@@ -6,6 +6,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import DatabaseError, models, transaction
 from django.urls import reverse
+from django.utils.module_loading import import_string
 from django.utils.translation import gettext_lazy as _
 
 from explorer import app_settings
@@ -283,6 +284,7 @@ class QueryResult:
 
         self._headers = self._get_headers()
         self._summary = {}
+        self.scrub_result()
 
     @property
     def data(self):
@@ -295,6 +297,14 @@ class QueryResult:
     @property
     def header_strings(self):
         return [str(h) for h in self.headers]
+
+    def scrub_result(self):
+        scrubber = app_settings.EXPLORER_RESULT_SCRUBBER
+        if not scrubber:
+            return
+        if isinstance(scrubber, str):
+            scrubber = import_string(scrubber)
+        scrubber(self)
 
     def _get_headers(self):
         return [

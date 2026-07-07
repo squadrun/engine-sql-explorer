@@ -135,6 +135,18 @@ List of tuples, see :ref:`Template Columns` more info.
    EXPLORER_TRANSFORMS = []
 
 
+Result scrubber
+***************
+
+Optional callable or dotted import path that receives each ``QueryResult`` after rows and headers are loaded. Use this
+to mutate ``result.data`` before it is rendered or exported, for example to redact sensitive values consistently across
+the UI and downloads.
+
+.. code-block:: python
+
+   EXPLORER_RESULT_SCRUBBER = None
+
+
 Recent query count
 ******************
 
@@ -379,4 +391,3 @@ to upload their own CSV and SQLite files directly to explorer as new connections
 Go to connections->Upload File. The uploaded files are limited in size by the
 `EXPLORER_MAX_UPLOAD_SIZE` setting which is set to 500mb by default (500 * 1024 * 1024). SQLite files (in either .db or
 .sqlite) will simply appear as connections. CSV files get run through a parser that infers the type of each field.
-
