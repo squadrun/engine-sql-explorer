@@ -65,6 +65,7 @@ EXPLORER_SCHEMA_INCLUDE_VIEWS = getattr(
 )
 
 EXPLORER_TRANSFORMS = getattr(settings, "EXPLORER_TRANSFORMS", [])
+EXPLORER_RESULT_SCRUBBER = getattr(settings, "EXPLORER_RESULT_SCRUBBER", None)
 EXPLORER_PERMISSION_VIEW = getattr(
     settings, "EXPLORER_PERMISSION_VIEW", lambda r: r.user.is_staff
 )

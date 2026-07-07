@@ -12,6 +12,11 @@ from explorer.tests.factories import SimpleQueryFactory
 from explorer.ee.db_connections.utils import default_db_connection
 
 
+def scrub_foo_values(result):
+    for row in result.data:
+        row[0] = "scrubbed"
+
+
 class TestQueryModel(TestCase):
 
     def test_params_get_merged(self):
@@ -209,6 +214,19 @@ class TestQueryResults(TestCase):
     def test_get_headers_no_results(self):
         self.qr._description = None
         self.assertEqual([ColumnHeader("--")][0].title, self.qr._get_headers()[0].title)
+
+    def test_result_scrubber_accepts_callable(self):
+        with patch.object(app_settings, "EXPLORER_RESULT_SCRUBBER", scrub_foo_values):
+            qr = QueryResult('select "secret" as "foo";', default_db_connection().as_django_connection())
+
+        self.assertEqual(qr.data, [["scrubbed"]])
+
+    def test_result_scrubber_accepts_import_path(self):
+        scrubber = "explorer.tests.test_models.scrub_foo_values"
+        with patch.object(app_settings, "EXPLORER_RESULT_SCRUBBER", scrubber):
+            qr = QueryResult('select "secret" as "foo";', default_db_connection().as_django_connection())
+
+        self.assertEqual(qr.data, [["scrubbed"]])
 
 
 class TestColumnSummary(TestCase):
