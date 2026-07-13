@@ -1,0 +1,64 @@
+name: Build wheel and attach to release
+
+# Builds the compiled frontend and a Python wheel, then attaches the wheel
+# (and sdist) to the GitHub Release that triggered this run. Consumers install
+# the release-asset wheel directly, so the built static assets ship inside the
+# package and no Node/Vite toolchain is required at install or deploy time.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write # required to upload release assets
+
+jobs:
+  build-and-attach:
+    name: Build wheel and attach to release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      # The Vite output filenames embed APP_VERSION (main.<version>.js), which the
+      # server-side template tag also computes from the package version. If the
+      # version lookup fails, APP_VERSION is empty and Vite emits `main..js`, which
+      # 404s at runtime while the build still exits 0. Fail loudly here instead.
+      - name: Verify frontend carries the version
+        run: |
+          VER="$(python -c 'from explorer import __version__; print(__version__)')"
+          if [ ! -f "explorer/static/explorer/main.${VER}.js" ]; then
+            echo "::error::Built frontend is missing main.${VER}.js — APP_VERSION was not applied during the Vite build."
+            ls -la explorer/static/explorer/ || true
+            exit 1
+          fi
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build --sdist --wheel --outdir dist/ .
+
+      - name: Verify wheel bundles the built static
+        run: |
+          python -m zipfile -l dist/*.whl | grep -q "explorer/static/explorer/main." \
+            || { echo "::error::wheel does not contain built static assets"; exit 1; }
+
+      - name: Attach artifacts to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/*.whl dist/*.tar.gz --clobber
