@@ -85,6 +85,16 @@ export class ExplorerEditor {
 
         window.editor = this.editor;
 
+        // A held Ctrl/Cmd+Enter auto-repeats keydown. Each repeat would submit the
+        // form again and cancel the previous request, while the server still runs
+        // every one of them. Capture phase, so CodeMirror never sees the repeats.
+        document.addEventListener('keydown', (e) => {
+            if (e.repeat && e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+        }, true);
+
         document.addEventListener('submitEventFromCM', (e) => {
             this.$submit.click();
         });
