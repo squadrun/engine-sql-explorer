@@ -1,4 +1,7 @@
+import logging
+
 from django.core.exceptions import ValidationError
+from django.db import DatabaseError
 from django.http import HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.urls import reverse_lazy
@@ -15,7 +18,35 @@ from explorer.utils import (
 from explorer.views.auth import PermissionRequiredMixin
 from explorer.views.mixins import ExplorerContextMixin
 from explorer.views.utils import query_viewmodel
-from explorer.ee.db_connections.utils import default_db_connection_id
+from explorer.ee.db_connections.models import DatabaseConnection
+from explorer.ee.db_connections.utils import default_db_connection, default_db_connection_id
+from explorer.schema import unreadable_columns
+
+
+logger = logging.getLogger(__name__)
+
+
+def unreadable_columns_context(connection_id=None):
+    """
+    Template context naming the columns the playground's connection cannot SELECT, so users learn
+    up front that `SELECT *` on those tables fails rather than from a "permission denied" error.
+    """
+    db_connection = None
+    if connection_id:
+        try:
+            db_connection = DatabaseConnection.objects.filter(id=connection_id).first()
+        except ValueError:
+            pass
+    db_connection = db_connection or default_db_connection()
+    # Opening an upload connection downloads its SQLite file; not worth it for a hint.
+    if db_connection.is_upload:
+        return {}
+    try:
+        columns = unreadable_columns(db_connection.as_django_connection())
+    except DatabaseError:
+        logger.exception("Could not list unreadable columns for connection %s", db_connection.alias)
+        return {}
+    return {"unreadable_columns": columns, "unreadable_columns_connection": db_connection.alias}
 
 
 class PlayQueryView(PermissionRequiredMixin, ExplorerContextMixin, View):
@@ -60,7 +91,8 @@ class PlayQueryView(PermissionRequiredMixin, ExplorerContextMixin, View):
             "explorer/play.html",
             {
                 "title": "Playground",
-                "form": QueryForm()
+                "form": QueryForm(),
+                **unreadable_columns_context(),
             }
         )
 
@@ -72,17 +104,22 @@ class PlayQueryView(PermissionRequiredMixin, ExplorerContextMixin, View):
             request.POST if len(request.POST) else None,
             instance=query
         )
+        # Before running the query, so a failed query can't leave the connection unusable for this.
+        unreadable = unreadable_columns_context(query.database_connection_id)
         return self.render_template(
             f"explorer/{template}.html",
-            query_viewmodel(
-                request,
-                query,
-                title="Playground",
-                run_query=run_query,
-                error=error,
-                rows=rows,
-                form=form
-            )
+            {
+                **query_viewmodel(
+                    request,
+                    query,
+                    title="Playground",
+                    run_query=run_query,
+                    error=error,
+                    rows=rows,
+                    form=form
+                ),
+                **unreadable,
+            }
         )
 
 

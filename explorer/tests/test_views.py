@@ -454,6 +454,33 @@ class TestQueryPlayground(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertTemplateUsed(resp, "explorer/play.html")
 
+    def test_playground_has_no_unreadable_columns_notice_by_default(self):
+        resp = self.client.get(reverse("explorer_playground"))
+        self.assertNotContains(resp, 'id="unreadable_columns"')
+
+    @patch("explorer.views.query.unreadable_columns")
+    def test_playground_lists_unreadable_columns(self, mocked_unreadable):
+        mocked_unreadable.return_value = [("auth_user", ["password"]), ("oauth_token", ["token", "code"])]
+        resp = self.client.get(reverse("explorer_playground"))
+        self.assertContains(resp, 'id="unreadable_columns"')
+        self.assertContains(resp, "<code>auth_user</code>: password")
+        self.assertContains(resp, "<code>oauth_token</code>: token, code")
+
+    @patch("explorer.views.query.unreadable_columns")
+    def test_playground_lists_unreadable_columns_after_running_sql(self, mocked_unreadable):
+        mocked_unreadable.return_value = [("auth_user", ["password"])]
+        resp = self.client.post(reverse("explorer_playground"), {"sql": "select 1+3400;"})
+        self.assertContains(resp, "3401")
+        self.assertContains(resp, "<code>auth_user</code>: password")
+
+    @patch("explorer.views.query.unreadable_columns")
+    def test_playground_renders_when_unreadable_columns_lookup_fails(self, mocked_unreadable):
+        mocked_unreadable.side_effect = DatabaseError("boom")
+        with self.assertLogs("explorer.views.query", level="ERROR"):
+            resp = self.client.get(reverse("explorer_playground"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotContains(resp, 'id="unreadable_columns"')
+
     def test_playground_renders_with_query_sql(self):
         query = SimpleQueryFactory(sql="select 1;")
         resp = self.client.get(

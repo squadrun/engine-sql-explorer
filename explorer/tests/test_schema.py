@@ -77,6 +77,39 @@ class TestSchemaInfo(TestCase):
         tables = [x[0] for x in res]
         self.assertNotIn(database_view, tables)
 
+    def test_partially_readable_tables_is_empty_off_postgres(self):
+        self.assertEqual(schema.partially_readable_tables(connection), {})
+
+    @patch("explorer.schema.partially_readable_tables")
+    def test_partially_readable_table_listed_from_catalog(self, mocked_partial):
+        # A table the role can read only some columns of: Django's `SELECT *` introspection would
+        # fail on it, so it must come from the catalog and still appear, with the hidden column marked.
+        mocked_partial.return_value = {
+            "auth_user": [("id", 23, True), ("password", 1043, False)],
+        }
+        res = dict(schema.build_schema_info(conn()))
+        # Type names come from the backend's oid map, which only Postgres keys by oid.
+        (id_name, id_type), (password_name, password_type) = res["auth_user"]
+        self.assertEqual((id_name, password_name), ("id", "password"))
+        self.assertNotEqual(id_type, schema.NO_ACCESS)
+        self.assertEqual(password_type, schema.NO_ACCESS)
+        self.assertIn("explorer_query", res)
+
+    @patch("explorer.schema.partially_readable_tables")
+    def test_unreadable_columns_lists_only_hidden_columns(self, mocked_partial):
+        mocked_partial.return_value = {
+            "oauth_token": [("id", 23, True), ("token", 25, False)],
+            "auth_user": [("id", 23, True), ("password", 1043, False), ("email", 1043, True)],
+        }
+        self.assertEqual(
+            schema.unreadable_columns(connection),
+            [("auth_user", ["password"]), ("oauth_token", ["token"])],
+        )
+
+    def test_transform_to_json_skips_unreadable_columns(self):
+        schema_info = [("auth_user", [("id", "IntegerField"), ("password", schema.NO_ACCESS)])]
+        self.assertEqual(schema.transform_to_json_schema(schema_info), {"auth_user": ["id"]})
+
     def test_transform_to_json(self):
         schema_info = [
             ("table1", [("col1", "type1"), ("col2", "type2")]),

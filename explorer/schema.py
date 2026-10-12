@@ -9,6 +9,52 @@ from explorer.tasks import build_schema_cache_async
 from explorer.utils import InvalidExplorerConnectionException
 
 
+# Shown as the type of a column the connection's role cannot SELECT.
+NO_ACCESS = "no access"
+
+# Postgres only: every column of each visible table the role can read only partly, i.e. it has
+# SELECT on some columns but not on the table. Django's get_table_description runs
+# `SELECT * FROM <table>`, which fails for such a table, so its columns come from here instead.
+_PARTIALLY_READABLE_COLUMNS_SQL = """
+SELECT c.relname, a.attname, a.atttypid, has_column_privilege(c.oid, a.attnum, 'SELECT')
+FROM pg_class c
+JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f')
+  AND pg_table_is_visible(c.oid)
+  AND has_any_column_privilege(c.oid, 'SELECT')
+  AND NOT has_table_privilege(c.oid, 'SELECT')
+ORDER BY c.relname, a.attnum
+"""
+
+
+def partially_readable_tables(connection):
+    """
+    Map each table the connection can read only some columns of to its columns.
+
+    :return: {"table_name": [("column_name", type_oid, readable), ...]}, in column order.
+             Always empty for engines other than Postgres.
+    """
+    if connection.vendor != "postgresql":
+        return {}
+    tables = {}
+    with connection.cursor() as cursor:
+        cursor.execute(_PARTIALLY_READABLE_COLUMNS_SQL)
+        for table_name, column_name, type_oid, readable in cursor.fetchall():
+            tables.setdefault(table_name, []).append((column_name, type_oid, readable))
+    return tables
+
+
+def unreadable_columns(connection):
+    """
+    :return: [("table_name", ["column_name", ...]), ...] for every column the connection's role
+             cannot SELECT on a table it can otherwise read, sorted by table name.
+    """
+    return [
+        (table_name, [name for name, _, readable in columns if not readable])
+        for table_name, columns in sorted(partially_readable_tables(connection).items())
+    ]
+
+
 # These wrappers make it easy to mock and test
 def _get_includes():
     return EXPLORER_SCHEMA_INCLUDE_TABLE_PREFIXES
@@ -40,8 +86,10 @@ def transform_to_json_schema(schema_info):
     json_schema = {}
     for table_name, columns in schema_info:
         json_schema[table_name] = []
-        for column_name, _ in columns:
-            json_schema[table_name].append(column_name)
+        for column_name, field_type in columns:
+            # Don't autocomplete a column the query would fail to read.
+            if field_type != NO_ACCESS:
+                json_schema[table_name].append(column_name)
     return json_schema
 
 
@@ -94,6 +142,7 @@ def build_schema_info(db_connection):
 
         """
     connection = db_connection.as_django_connection()
+    partially_readable = partially_readable_tables(connection)
     ret = []
     with connection.cursor() as cursor:
         tables_to_introspect = connection.introspection.table_names(
@@ -102,6 +151,12 @@ def build_schema_info(db_connection):
 
         for table_name in tables_to_introspect:
             if not _include_table(table_name):
+                continue
+            if table_name in partially_readable:
+                ret.append((table_name, [
+                    (name, _catalog_field_type(connection, type_oid) if readable else NO_ACCESS)
+                    for name, type_oid, readable in partially_readable[table_name]
+                ]))
                 continue
             try:
                 table_description = connection.introspection.get_table_description(
@@ -123,5 +178,13 @@ def build_schema_info(db_connection):
                 td.append((column_name, field_type))
             ret.append((table_name, td))
     return ret
+
+
+def _catalog_field_type(connection, type_oid):
+    # Same lookup get_field_type does, without the cursor.description row it needs.
+    try:
+        return connection.introspection.data_types_reverse[type_oid]
+    except KeyError:
+        return "Unknown"
 
 
