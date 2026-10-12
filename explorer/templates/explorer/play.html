@@ -11,6 +11,22 @@
                     The playground is for experimenting and writing ad-hoc queries. By default, nothing you do here will be saved.
                 {% endblocktranslate %}
             </p>
+            {% if unreadable_columns %}
+                <details class="alert alert-warning" id="unreadable_columns">
+                    <summary>
+                        {% blocktranslate trimmed with connection=unreadable_columns_connection %}
+                            Some columns are not readable on the <code>{{ connection }}</code> connection.
+                            Selecting them fails with "permission denied", and so does <code>SELECT *</code>
+                            on their tables. Name the columns you need instead.
+                        {% endblocktranslate %}
+                    </summary>
+                    <ul class="mb-0 mt-2">
+                        {% for table, columns in unreadable_columns %}
+                            <li><code>{{ table }}</code>: {{ columns|join:", " }}</li>
+                        {% endfor %}
+                    </ul>
+                </details>
+            {% endif %}
             <form role="form" action="{% url 'explorer_playground' %}" method="post" id="editor" class="playground-form form-horizontal">{% csrf_token %}
                 {% if error %}
                     <div class="alert alert-danger db-error">{{ error|escape }}</div>
