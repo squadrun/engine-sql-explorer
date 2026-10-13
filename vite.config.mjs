@@ -44,7 +44,9 @@ export default defineConfig({
       },
       output: {
         entryFileNames: `[name].${process.env.APP_VERSION}.js`,
-        chunkFileNames: `[name].${process.env.APP_VERSION}.js`,
+        // Content-hashed so a changed chunk gets a new URL even when the
+        // package version does not change (see content_version in vite.py).
+        chunkFileNames: `[name].[hash].js`,
         assetFileNames: `[name].[ext]`
       },
     },

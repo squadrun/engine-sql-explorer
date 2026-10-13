@@ -1,7 +1,10 @@
+import hashlib
 import os
+from functools import cache
 
 from django import template
 from django.conf import settings
+from django.contrib.staticfiles import finders
 from django.contrib.staticfiles.storage import staticfiles_storage
 from django.utils.safestring import mark_safe
 from explorer import app_settings, get_version
@@ -14,10 +17,32 @@ VITE_SERVER_HOST = getattr(settings, "VITE_SERVER_HOST", "localhost")
 VITE_SERVER_PORT = getattr(settings, "VITE_SERVER_PORT", "5173")
 
 
+@cache
+def content_version(file: str) -> str:
+    """
+    Cache-busting query string for a built entry file, derived from its bytes.
+
+    The entry filenames only carry the package version (main.5.3.js), which
+    does not change between fork releases, so a host serving static files as
+    long-lived/immutable keeps handing browsers the old bundle. Hashing the
+    content gives each build its own URL. Chunks are content-hashed by Vite
+    itself, and the entry embeds their names, so this covers them too.
+
+    Returns "" when the file is not found (no frontend built, e.g. in tests);
+    the URL is then the unversioned one, as before.
+    """
+    path = finders.find(f"explorer/{file}")
+    if not path:
+        return ""
+    with open(path, "rb") as f:
+        return "?v=" + hashlib.sha256(f.read()).hexdigest()[:12]
+
+
 def get_css_link(file: str) -> str:
     if app_settings.VITE_DEV_MODE is False:
         file = file.replace(".scss", ".css")
         base_url = f"{VITE_OUTPUT_DIR}"
+        return mark_safe(f'<link rel="stylesheet" href="{base_url}{file}{content_version(file)}">')
     else:
         base_url = f"http://{VITE_SERVER_HOST}:{VITE_SERVER_PORT}/{VITE_DEV_DIR}"
     return mark_safe(f'<link rel="stylesheet" href="{base_url}{file}">')
@@ -26,7 +51,7 @@ def get_css_link(file: str) -> str:
 def get_script(file: str) -> str:
     if app_settings.VITE_DEV_MODE is False:
         file = file.replace(".js", f".{get_version()}.js")
-        return mark_safe(f'<script type="module" src="{VITE_OUTPUT_DIR}{file}"></script>')
+        return mark_safe(f'<script type="module" src="{VITE_OUTPUT_DIR}{file}{content_version(file)}"></script>')
     else:
         base_url = f"http://{VITE_SERVER_HOST}:{VITE_SERVER_PORT}/{VITE_DEV_DIR}"
     return mark_safe(f'<script type="module" src="{base_url}{file}"></script>')
