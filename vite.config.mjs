@@ -33,6 +33,8 @@ export default defineConfig({
     outDir: resolve(__dirname, './explorer/static/explorer'),
     assetsDir: '',
     emptyOutDir: true,
+    // The vite_asset template tag reads the hashed entry filename from here.
+    manifest: 'manifest.json',
     target: 'es2015',
     rollupOptions: {
       input: {
@@ -43,9 +45,12 @@ export default defineConfig({
         styles: resolve(__dirname, '/explorer/src/scss/styles.scss'),
       },
       output: {
-        entryFileNames: `[name].${process.env.APP_VERSION}.js`,
-        // Content-hashed so a changed chunk gets a new URL even when the
-        // package version does not change (see content_version in vite.py).
+        // Entry and chunks are content-hashed so a changed bundle gets a new URL
+        // even when the package version does not change. The entry must be
+        // versioned by its filename, not a query string: chunks import the
+        // entry by bare filename, and a URL that differs from the <script> src
+        // makes the browser evaluate the entry (and Bootstrap) a second time.
+        entryFileNames: `[name].[hash].js`,
         chunkFileNames: `[name].[hash].js`,
         assetFileNames: `[name].[ext]`
       },

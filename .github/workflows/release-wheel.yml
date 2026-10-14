@@ -35,18 +35,23 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      # The Vite output filenames embed APP_VERSION (main.<version>.js), which the
-      # server-side template tag also computes from the package version. If the
-      # version lookup fails, APP_VERSION is empty and Vite emits `main..js`, which
-      # 404s at runtime while the build still exits 0. Fail loudly here instead.
-      - name: Verify frontend carries the version
+      # The vite_asset template tag resolves the content-hashed entry filename
+      # through the Vite manifest. Without it (or its main.js entry) the page
+      # loads an unhashed main.js that 404s while the build still exits 0.
+      - name: Verify frontend manifest names the entry
         run: |
-          VER="$(python -c 'from explorer import __version__; print(__version__)')"
-          if [ ! -f "explorer/static/explorer/main.${VER}.js" ]; then
-            echo "::error::Built frontend is missing main.${VER}.js — APP_VERSION was not applied during the Vite build."
-            ls -la explorer/static/explorer/ || true
-            exit 1
-          fi
+          python - <<'EOF'
+          import json, os, sys
+          out = "explorer/static/explorer"
+          try:
+              with open(f"{out}/manifest.json") as f:
+                  entry = json.load(f)["explorer/src/js/main.js"]["file"]
+          except (OSError, KeyError, ValueError) as e:
+              sys.exit(f"::error::Vite manifest missing or has no main.js entry: {e!r}")
+          if not os.path.isfile(f"{out}/{entry}"):
+              sys.exit(f"::error::Vite manifest names {entry}, which was not built")
+          print(f"main.js entry: {entry}")
+          EOF
 
       - name: Build sdist and wheel
         run: |
@@ -55,7 +60,7 @@ jobs:
 
       - name: Verify wheel bundles the built static
         run: |
-          python -m zipfile -l dist/*.whl | grep -q "explorer/static/explorer/main." \
+          python -m zipfile -l dist/*.whl | grep -q "explorer/static/explorer/manifest.json" \
             || { echo "::error::wheel does not contain built static assets"; exit 1; }
 
       - name: Attach artifacts to the release
